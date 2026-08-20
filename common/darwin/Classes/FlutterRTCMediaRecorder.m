@@ -3,7 +3,7 @@
 #import "FlutterRTCAudioSink.h"
 #import "FlutterRTCFrameCapturer.h"
 
-@import AVFoundation;
+#import <AVFoundation/AVFoundation.h>
 
 @implementation FlutterRTCMediaRecorder {
     int framesCount;

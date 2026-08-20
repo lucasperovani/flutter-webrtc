@@ -1,7 +1,7 @@
 #import "FlutterRTCAudioRecorder.h"
 #import "FlutterRTCAudioSink.h"
 
-@import CoreMedia;
+#import <CoreMedia/CoreMedia.h>
 
 /// WAV header size in bytes.
 static const NSUInteger kWAVHeaderSize = 44;
@@ -32,7 +32,7 @@ static const NSUInteger kWAVHeaderSize = 44;
         _headerWritten = NO;
         _stopped = NO;
 
-        __weak typeof(self) weakSelf = self;
+        __weak __typeof(self) weakSelf = self;
         _audioSink.bufferCallback = ^(CMSampleBufferRef buffer) {
             FlutterRTCAudioRecorder *strong = weakSelf;
             if (strong == nil || strong->_stopped) {
@@ -60,7 +60,7 @@ static const NSUInteger kWAVHeaderSize = 44;
     // reused after this callback returns).
     NSMutableData *pcmData = [NSMutableData dataWithLength:dataLength];
     OSStatus status = CMBlockBufferCopyDataBytes(blockBuffer, 0, dataLength, pcmData.mutableBytes);
-    if (status != kCMNoErr) {
+    if (status != noErr) {
         return;
     }
 
@@ -89,7 +89,7 @@ static const NSUInteger kWAVHeaderSize = 44;
         int channels = _channels;
         int bitsPerSample = _bitsPerSample;
         NSURL *outputURL = _outputURL;
-        __weak typeof(self) weakSelf = self;
+        __weak __typeof(self) weakSelf = self;
         dispatch_async(_ioQueue, ^{
             FlutterRTCAudioRecorder *strong = weakSelf;
             if (strong == nil || strong->_stopped) {
@@ -103,7 +103,7 @@ static const NSUInteger kWAVHeaderSize = 44;
     }
 
     uint64_t byteCount = dataLength;
-    __weak typeof(self) weakSelf = self;
+    __weak __typeof(self) weakSelf = self;
     dispatch_async(_ioQueue, ^{
         FlutterRTCAudioRecorder *strong = weakSelf;
         if (strong == nil || strong->_stopped || strong->_fileHandle == nil) {
@@ -188,7 +188,7 @@ static const NSUInteger kWAVHeaderSize = 44;
     [_audioSink close];
     _audioSink = nil;
 
-    __weak typeof(self) weakSelf = self;
+    __weak __typeof(self) weakSelf = self;
     dispatch_async(_ioQueue, ^{
         FlutterRTCAudioRecorder *strong = weakSelf;
         if (strong == nil) {

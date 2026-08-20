@@ -5,7 +5,7 @@
 #endif
 #import <WebRTC/WebRTC.h>
 
-@import Foundation;
+#import <Foundation/Foundation.h>
 
 /// Records PCM audio from an [RTCAudioTrack] (local or remote) to a WAV file.
 @interface FlutterRTCAudioRecorder : NSObject
