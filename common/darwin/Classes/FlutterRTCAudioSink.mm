@@ -19,10 +19,16 @@
 }
 
 - (void) close {
-    _audioSource->RemoveSink(_bridge);
-    delete _bridge;
-    _bridge = nil;
-    _audioSource = nil;
+    if (_audioSource != nil) {
+        _audioSource->RemoveSink(_bridge);
+        _audioSource = nil;
+    }
+    if (_bridge != nil) {
+        // Balance the CFBridgingRetain from initWithAudioTrack:.
+        CFRelease((__bridge CFTypeRef)(self));
+        delete _bridge;
+        _bridge = nil;
+    }
 }
 
 void RTCAudioSinkCallback (void *object, const void *audio_data, int bits_per_sample, int sample_rate, size_t number_of_channels, size_t number_of_frames)
@@ -44,24 +50,39 @@ void RTCAudioSinkCallback (void *object, const void *audio_data, int bits_per_sa
     audioDescription.mFramesPerPacket = 1;
     audioDescription.mReserved = 0;
     audioDescription.mSampleRate = sample_rate;
-    CMAudioFormatDescriptionRef formatDesc;
-    CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &audioDescription, 0, nil, 0, nil, nil, &formatDesc);
-    CMSampleBufferRef buffer;
+    CMAudioFormatDescriptionRef formatDesc = NULL;
+    OSStatus fmtStatus = CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &audioDescription, 0, nil, 0, nil, nil, &formatDesc);
+    if (fmtStatus != noErr || formatDesc == NULL) {
+        return;
+    }
+    CMSampleBufferRef buffer = NULL;
     CMSampleTimingInfo timing;
     timing.decodeTimeStamp = kCMTimeInvalid;
     timing.presentationTimeStamp = CMTimeMake(0, sample_rate);
     timing.duration = CMTimeMake(1, sample_rate);
-    CMSampleBufferCreate(kCFAllocatorDefault, nil, false, nil, nil, formatDesc, number_of_frames * number_of_channels, 1, &timing, 0, nil, &buffer);
-    CMSampleBufferSetDataBufferFromAudioBufferList(buffer, kCFAllocatorDefault, kCFAllocatorDefault, 0, &audioBufferList);
+    OSStatus bufStatus = CMSampleBufferCreate(kCFAllocatorDefault, nil, false, nil, nil, formatDesc, number_of_frames * number_of_channels, 1, &timing, 0, nil, &buffer);
+    if (bufStatus != noErr || buffer == NULL) {
+        CFRelease(formatDesc);
+        return;
+    }
+    OSStatus dataStatus = CMSampleBufferSetDataBufferFromAudioBufferList(buffer, kCFAllocatorDefault, kCFAllocatorDefault, 0, &audioBufferList);
+    if (dataStatus != noErr) {
+        CFRelease(buffer);
+        CFRelease(formatDesc);
+        return;
+    }
     @autoreleasepool {
         FlutterRTCAudioSink* sink = (__bridge FlutterRTCAudioSink*)(object);
-        sink.format = formatDesc;
+        // Retain formatDesc for the sink property (previous value is released by ARC).
+        sink.format = (CMAudioFormatDescriptionRef)CFAutorelease(CFRetain(formatDesc));
         if (sink.bufferCallback != nil) {
             sink.bufferCallback(buffer);
         } else {
             NSLog(@"Buffer callback is nil");
         }
     }
+    CFRelease(buffer);
+    CFRelease(formatDesc);
 }
 
 @end

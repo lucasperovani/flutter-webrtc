@@ -11,6 +11,7 @@
 #import "FlutterRTCFrameCryptor.h"
 #if TARGET_OS_IPHONE
 #import "FlutterRTCMediaRecorder.h"
+#import "FlutterRTCAudioRecorder.h"
 #endif
 #if TARGET_OS_IPHONE || TARGET_OS_OSX
 #import "FlutterRTCVideoPlatformViewFactory.h"
@@ -256,6 +257,7 @@ static __weak id<RTCAudioDeviceModuleDelegate> gAudioDeviceModuleObserver = nil;
   self.keyProviders = [NSMutableDictionary new];
   self.videoCapturerStopHandlers = [NSMutableDictionary new];
   self.recorders = [NSMutableDictionary new];
+  self.audioRecorders = [NSMutableDictionary new];
 #if TARGET_OS_IPHONE
   self.focusMode = @"locked";
   self.exposureMode = @"locked";
@@ -1720,6 +1722,38 @@ static __weak id<RTCAudioDeviceModuleDelegate> gAudioDeviceModuleObserver = nil;
                                               message:[NSString stringWithFormat:@"Error: recorder with id %@ not found!",recorderId]
                                                 details:nil]);
                 }
+  } else if ([@"startAudioRecordToFile" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSNumber* recorderId = argsMap[@"recorderId"];
+      NSString* path = argsMap[@"path"];
+      NSString* trackId = argsMap[@"trackId"];
+      NSString* peerConnectionId = argsMap[@"peerConnectionId"];
+
+      RTCMediaStreamTrack* track = [self trackForId:trackId peerConnectionId:peerConnectionId];
+      if (track != nil && [track isKindOfClass:[RTCAudioTrack class]]) {
+          NSURL* pathUrl = [NSURL fileURLWithPath:path];
+          self.audioRecorders[recorderId] = [[FlutterRTCAudioRecorder alloc]
+                  initWithAudioTrack:(RTCAudioTrack*)track
+                  outputFile:pathUrl];
+      } else {
+          result([FlutterError errorWithCode:@"startAudioRecordToFile failed"
+                                    message:@"Audio track not found or not an audio track"
+                                    details:nil]);
+          return;
+      }
+      result(nil);
+  } else if ([@"stopAudioRecordToFile" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSNumber* recorderId = argsMap[@"recorderId"];
+      FlutterRTCAudioRecorder* recorder = self.audioRecorders[recorderId];
+      if (recorder != nil) {
+          [recorder stop:result];
+          [self.audioRecorders removeObjectForKey:recorderId];
+      } else {
+          result([FlutterError errorWithCode:@"stopAudioRecordToFile failed"
+                                    message:[NSString stringWithFormat:@"Error: audio recorder with id %@ not found!", recorderId]
+                                    details:nil]);
+      }
 #endif
     } else if ([@"startLocalRecording" isEqualToString:call.method]) {
       RTCAudioDeviceModule* adm = _peerConnectionFactory.audioDeviceModule;
