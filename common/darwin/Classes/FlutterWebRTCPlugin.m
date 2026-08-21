@@ -1735,11 +1735,6 @@ static __weak id<RTCAudioDeviceModuleDelegate> gAudioDeviceModuleObserver = nil;
           self.audioRecorders[recorderId] = [[FlutterRTCAudioRecorder alloc]
                   initWithAudioTrack:(RTCAudioTrack*)track
                   outputFile:pathUrl];
-      } else {
-          result([FlutterError errorWithCode:@"startAudioRecordToFile failed"
-                                    message:@"Audio track not found or not an audio track"
-                                    details:nil]);
-          return;
       }
       result(nil);
   } else if ([@"stopAudioRecordToFile" isEqualToString:call.method]) {

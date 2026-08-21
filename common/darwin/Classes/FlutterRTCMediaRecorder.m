@@ -162,16 +162,18 @@
 }
 
 - (void)stop:(FlutterResult _Nonnull) result {
-    if (_audioSink != nil) {
-        _audioSink.bufferCallback = nil;
-        [_audioSink close];
+    FlutterRTCAudioSink *audioSink = _audioSink;
+    _audioSink = nil;
+    if (audioSink != nil) {
+        [audioSink close];
     }
     [self.videoTrack removeRenderer:self];
     [self.writerInput markAsFinished];
     [_audioWriter markAsFinished];
+    AVAssetWriter *writer = self.assetWriter;
     dispatch_async(dispatch_get_main_queue(), ^{
-       [self.assetWriter finishWritingWithCompletionHandler:^{
-           NSError* error = self.assetWriter.error;
+       [writer finishWritingWithCompletionHandler:^{
+           NSError* error = writer.error;
            if (error == nil) {
                result(nil);
            } else {

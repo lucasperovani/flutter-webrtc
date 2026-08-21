@@ -5,7 +5,8 @@ import 'package:webrtc_interface/webrtc_interface.dart';
 import 'native/media_stream_track_impl.dart';
 import 'native/utils.dart';
 
-/// Records PCM audio from a remote [MediaStreamTrack] (audio) to a WAV file.
+/// Records audio from a remote [MediaStreamTrack] (audio) to a compressed
+/// M4A (AAC) file on iOS/macOS, or an AMR/WAV file on Android.
 ///
 /// This works on iOS and Android. On the web, use [MediaRecorder] instead.
 class AudioRecorder {
@@ -15,7 +16,8 @@ class AudioRecorder {
   final _recorderId = _nextId++;
   bool _isStarted = false;
 
-  /// Starts recording audio from [track] to [path] as a WAV file (PCM 16-bit).
+  /// Starts recording audio from [track] to [path] as a compressed audio file
+  /// (M4A/AAC on iOS/macOS).
   ///
   /// [track] must be an audio track obtained from a remote [MediaStream]
   /// (i.e. received via [RTCPeerConnection.onTrack] or [onAddStream]).
@@ -45,7 +47,7 @@ class AudioRecorder {
     }
   }
 
-  /// Stops recording and finalizes the WAV file.
+  /// Stops recording and finalizes the audio file.
   Future<void> stop() async {
     if (!_isStarted) {
       throw Exception('AudioRecorder not started');

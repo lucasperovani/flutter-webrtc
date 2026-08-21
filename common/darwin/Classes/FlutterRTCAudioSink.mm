@@ -1,16 +1,22 @@
 #import <AVFoundation/AVFoundation.h>
+#import <os/lock.h>
 #import "FlutterRTCAudioSink.h"
 #import "RTCAudioSource+Private.h"
+#include <atomic>
 #include "media_stream_interface.h"
 #include "audio_sink_bridge.cpp"
 
 @implementation FlutterRTCAudioSink {
     AudioSinkBridge *_bridge;
     webrtc::AudioSourceInterface* _audioSource;
+    os_unfair_lock _lock;
+    BOOL _closed;
 }
 
 - (instancetype) initWithAudioTrack:(RTCAudioTrack* )audio {
     self = [super init];
+    _lock = OS_UNFAIR_LOCK_INIT;
+    _closed = NO;
     rtc::scoped_refptr<webrtc::AudioSourceInterface> audioSourcePtr = audio.source.nativeAudioSource;
     _audioSource = audioSourcePtr.get();
     _bridge = new AudioSinkBridge((void*)CFBridgingRetain(self));
@@ -19,6 +25,35 @@
 }
 
 - (void) close {
+    os_unfair_lock_lock(&_lock);
+    if (_closed) {
+        os_unfair_lock_unlock(&_lock);
+        return;
+    }
+    _closed = YES;
+    self.bufferCallback = nil;
+    os_unfair_lock_unlock(&_lock);
+
+    // Tell the C++ bridge to stop invoking the Objective-C callback immediately,
+    // even if RemoveSink has not finished yet.
+    if (_bridge != nil) {
+        _bridge->Close();
+    }
+
+    // RemoveSink must complete before the bridge object or self can be destroyed,
+    // because the audio thread may still be inside OnData -> RTCAudioSinkCallback.
+    // RemoveSink on WebRTC is synchronous on the caller side, but run it on the
+    // main thread to match WebRTC thread expectations and avoid deadlocks.
+    if ([NSThread isMainThread]) {
+        [self doClose];
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            [self doClose];
+        });
+    }
+}
+
+- (void) doClose {
     if (_audioSource != nil) {
         _audioSource->RemoveSink(_bridge);
         _audioSource = nil;
@@ -33,6 +68,20 @@
 
 void RTCAudioSinkCallback (void *object, const void *audio_data, int bits_per_sample, int sample_rate, size_t number_of_channels, size_t number_of_frames)
 {
+    FlutterRTCAudioSink* sink = (__bridge FlutterRTCAudioSink*)(object);
+
+    os_unfair_lock_lock(&sink->_lock);
+    if (sink->_closed) {
+        os_unfair_lock_unlock(&sink->_lock);
+        return;
+    }
+    void (^callback)(CMSampleBufferRef) = [sink.bufferCallback copy];
+    os_unfair_lock_unlock(&sink->_lock);
+
+    if (callback == nil) {
+        return;
+    }
+
     AudioBufferList audioBufferList;
     AudioBuffer audioBuffer;
     audioBuffer.mData = (void*) audio_data;
@@ -72,14 +121,9 @@ void RTCAudioSinkCallback (void *object, const void *audio_data, int bits_per_sa
         return;
     }
     @autoreleasepool {
-        FlutterRTCAudioSink* sink = (__bridge FlutterRTCAudioSink*)(object);
         // Retain formatDesc for the sink property (previous value is released by ARC).
         sink.format = (CMAudioFormatDescriptionRef)CFAutorelease(CFRetain(formatDesc));
-        if (sink.bufferCallback != nil) {
-            sink.bufferCallback(buffer);
-        } else {
-            NSLog(@"Buffer callback is nil");
-        }
+        callback(buffer);
     }
     CFRelease(buffer);
     CFRelease(formatDesc);
