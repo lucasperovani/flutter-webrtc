@@ -48,7 +48,7 @@
     bzero(&acl, sizeof(acl));
     acl.mChannelLayoutTag = channels > 1 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_Mono;
 
-    NSLog(@"FlutterRTCAudioRecorder: initializing writer with sampleRate=%f channels=%u", sampleRate, (unsigned int)channels);
+    // NSLog(@"FlutterRTCAudioRecorder: initializing writer with sampleRate=%f channels=%u", sampleRate, (unsigned int)channels);
 
     NSDictionary *audioSettings = @{
         AVFormatIDKey: [NSNumber numberWithInt:kAudioFormatMPEG4AAC],
@@ -99,15 +99,10 @@
         }
     }
     if (_audioWriter.readyForMoreMediaData) {
-        CMTime pts = CMSampleBufferGetPresentationTimeStamp(buffer);
-        NSLog(@"FlutterRTCAudioRecorder: appending buffer pts=%lld/%d ready=%d",
-              pts.value, pts.timescale, _audioWriter.readyForMoreMediaData);
         if (![_audioWriter appendSampleBuffer:buffer]) {
             NSLog(@"FlutterRTCAudioRecorder: failed to append buffer: %@",
                   self.assetWriter.error);
         }
-    } else {
-        NSLog(@"FlutterRTCAudioRecorder: writer not ready, dropping buffer");
     }
 }
 
