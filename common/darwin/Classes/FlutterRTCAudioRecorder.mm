@@ -27,34 +27,8 @@
             }
             [strong appendSampleBuffer:buffer];
         };
-
-        // Eagerly initialize the asset writer so that stop() always has a
-        // valid writer to finalize, even if no audio buffer arrives before
-        // the user stops the recording.
-        [self initializeWriterWithFormat:[self defaultFormatDescription]];
     }
     return self;
-}
-
-- (CMAudioFormatDescriptionRef)defaultFormatDescription {
-    AudioStreamBasicDescription audioDescription;
-    bzero(&audioDescription, sizeof(audioDescription));
-    audioDescription.mFormatID = kAudioFormatLinearPCM;
-    audioDescription.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
-    audioDescription.mSampleRate = 48000.0;
-    audioDescription.mChannelsPerFrame = 2;
-    audioDescription.mBitsPerChannel = 16;
-    audioDescription.mBytesPerFrame = audioDescription.mBitsPerChannel / 8 * audioDescription.mChannelsPerFrame;
-    audioDescription.mBytesPerPacket = audioDescription.mBytesPerFrame;
-    audioDescription.mFramesPerPacket = 1;
-    audioDescription.mReserved = 0;
-
-    CMAudioFormatDescriptionRef formatDesc = NULL;
-    OSStatus fmtStatus = CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &audioDescription, 0, nil, 0, nil, nil, &formatDesc);
-    if (fmtStatus != noErr || formatDesc == NULL) {
-        return NULL;
-    }
-    return (CMAudioFormatDescriptionRef)CFAutorelease(formatDesc);
 }
 
 - (void)initializeWriterWithFormat:(CMAudioFormatDescriptionRef)format {
@@ -66,13 +40,20 @@
         return;
     }
 
+    const AudioStreamBasicDescription *asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format);
+    UInt32 channels = asbd ? asbd->mChannelsPerFrame : 1;
+    Float64 sampleRate = asbd ? asbd->mSampleRate : 48000.0;
+
     AudioChannelLayout acl;
     bzero(&acl, sizeof(acl));
-    acl.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo;
+    acl.mChannelLayoutTag = channels > 1 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_Mono;
+
+    NSLog(@"FlutterRTCAudioRecorder: initializing writer with sampleRate=%f channels=%u", sampleRate, (unsigned int)channels);
+
     NSDictionary *audioSettings = @{
         AVFormatIDKey: [NSNumber numberWithInt:kAudioFormatMPEG4AAC],
-        AVNumberOfChannelsKey: @2,
-        AVSampleRateKey: @48000.0,
+        AVNumberOfChannelsKey: @(channels),
+        AVSampleRateKey: @(sampleRate),
         AVChannelLayoutKey: [NSData dataWithBytes:&acl length:sizeof(AudioChannelLayout)],
         AVEncoderBitRateKey: @128000,
     };
@@ -100,6 +81,9 @@
 }
 
 - (void)appendSampleBuffer:(CMSampleBufferRef)buffer {
+    if (_stopped) {
+        return;
+    }
     if (!_isInitialized) {
         CMAudioFormatDescriptionRef format =
             (CMAudioFormatDescriptionRef)CMSampleBufferGetFormatDescription(buffer);
@@ -110,14 +94,20 @@
             [self initializeWriterWithFormat:format];
         }
         if (!_isInitialized) {
+            NSLog(@"FlutterRTCAudioRecorder: dropping buffer, writer not initialized");
             return;
         }
     }
     if (_audioWriter.readyForMoreMediaData) {
+        CMTime pts = CMSampleBufferGetPresentationTimeStamp(buffer);
+        NSLog(@"FlutterRTCAudioRecorder: appending buffer pts=%lld/%d ready=%d",
+              pts.value, pts.timescale, _audioWriter.readyForMoreMediaData);
         if (![_audioWriter appendSampleBuffer:buffer]) {
             NSLog(@"FlutterRTCAudioRecorder: failed to append buffer: %@",
                   self.assetWriter.error);
         }
+    } else {
+        NSLog(@"FlutterRTCAudioRecorder: writer not ready, dropping buffer");
     }
 }
 
@@ -127,6 +117,17 @@
     // Remove the sink first (stops callbacks from the audio thread).
     [_audioSink close];
     _audioSink = nil;
+
+    // If no audio buffer ever arrived, create an empty output file so callers
+    // can still attempt muxing (FFmpeg will handle the missing audio).
+    if (!_isInitialized) {
+        NSLog(@"FlutterRTCAudioRecorder: stop called before any audio buffer; creating empty file");
+        [[NSFileManager defaultManager] createFileAtPath:self.output.path
+                                                  contents:[NSData data]
+                                                attributes:nil];
+        result(nil);
+        return;
+    }
 
     if (_audioWriter != nil) {
         [_audioWriter markAsFinished];
