@@ -29,9 +29,8 @@ class AudioRecorder {
       throw Exception('Track must be an audio track, got: ${track.kind}');
     }
 
-    final peerConnectionId = track is MediaStreamTrackNative
-        ? track.peerConnectionId
-        : null;
+    final peerConnectionId =
+        track is MediaStreamTrackNative ? track.peerConnectionId : null;
 
     try {
       await WebRTC.invokeMethod('startAudioRecordToFile', {
