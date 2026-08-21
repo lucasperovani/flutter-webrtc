@@ -6,6 +6,23 @@
 #include "media_stream_interface.h"
 #include "audio_sink_bridge.cpp"
 
+/// Holds a C++ AudioSinkBridge and the matching CFBridgingRetain on the
+/// Objective-C sink. Deletes the bridge and releases the sink after a short
+/// delay, giving the WebRTC audio thread time to finish any in-flight OnData
+/// call that may still reference the bridge.
+class AudioSinkBridgeDelayedDeleter {
+public:
+    AudioSinkBridgeDelayedDeleter(AudioSinkBridge* bridge, CFTypeRef sinkRef)
+        : _bridge(bridge), _sinkRef(sinkRef) {}
+    ~AudioSinkBridgeDelayedDeleter() {
+        delete _bridge;
+        CFRelease(_sinkRef);
+    }
+private:
+    AudioSinkBridge* _bridge;
+    CFTypeRef _sinkRef;
+};
+
 @implementation FlutterRTCAudioSink {
     AudioSinkBridge *_bridge;
     webrtc::AudioSourceInterface* _audioSource;
@@ -59,10 +76,23 @@
         _audioSource = nil;
     }
     if (_bridge != nil) {
-        // Balance the CFBridgingRetain from initWithAudioTrack:.
-        CFRelease((__bridge CFTypeRef)(self));
-        delete _bridge;
+        // Keep the Objective-C sink alive and defer deletion of the C++ bridge.
+        // The WebRTC audio thread may still be inside OnData even after RemoveSink
+        // returns; deleting the bridge immediately causes AURemoteIO EXC_BAD_ACCESS.
+        // The delayed deleter is destroyed (and frees the bridge + releases self) on
+        // a background queue after a short grace period.
+        CFTypeRef sinkRef = (__bridge_retained CFTypeRef)(self);
+        AudioSinkBridge* bridge = _bridge;
         _bridge = nil;
+        // Use a longer grace period. The WebRTC audio thread may have already
+        // read our sink pointer from the internal sink list before RemoveSink
+        // acquired its mutex; deleting the bridge too early causes it to call
+        // a dangling vtable. 1.5s is conservative for a 10ms audio callback.
+        NSLog(@"FlutterRTCAudioSink: deferring bridge deletion for 1.5s");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            NSLog(@"FlutterRTCAudioSink: deleting deferred bridge");
+            AudioSinkBridgeDelayedDeleter deleter(bridge, sinkRef);
+        });
     }
 }
 

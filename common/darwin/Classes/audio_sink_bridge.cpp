@@ -25,6 +25,11 @@ public:
         if (_closed.load()) {
             return;
         }
+        // Defensive null-check in case the audio thread still reaches us after
+        // the bridge has been detached but before the delayed deleter runs.
+        if (sink == nullptr) {
+            return;
+        }
         RTCAudioSinkCallback(sink,
                              audio_data,
                              bits_per_sample,
