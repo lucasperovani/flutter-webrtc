@@ -9,6 +9,9 @@
     BOOL _stopped;
     FlutterRTCAudioSink *_audioSink;
     AVAssetWriterInput *_audioWriter;
+    NSString *_previousAudioCategory;
+    NSString *_previousAudioMode;
+    AVAudioSessionCategoryOptions _previousAudioCategoryOptions;
 }
 
 - (instancetype)initWithAudioTrack:(RTCAudioTrack *)audio outputFile:(NSURL *)out {
@@ -27,8 +30,55 @@
             }
             [strong appendSampleBuffer:buffer];
         };
+
+        [self applyEchoCancellationAudioSession];
     }
     return self;
+}
+
+- (void)applyEchoCancellationAudioSession {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSError *error = nil;
+
+    // Save current configuration so we can restore it in stop.
+    _previousAudioCategory = session.category;
+    _previousAudioMode = session.mode;
+    _previousAudioCategoryOptions = session.categoryOptions;
+
+    // Configure PlayAndRecord + VideoChat mode to enable iOS AEC.
+    // AEC removes from the microphone the audio that is playing on the speaker,
+    // preventing echo when the remote WebRTC audio is also being recorded.
+    BOOL success = [session setCategory:AVAudioSessionCategoryPlayAndRecord
+                            withOptions:AVAudioSessionCategoryOptionAllowBluetooth |
+                                        AVAudioSessionCategoryOptionAllowBluetoothA2DP |
+                                        AVAudioSessionCategoryOptionDefaultToSpeaker
+                                  error:&error];
+    if (!success) {
+        NSLog(@"FlutterRTCAudioRecorder: setCategory failed: %@", error.localizedDescription);
+    }
+
+    success = [session setMode:AVAudioSessionModeVideoChat error:&error];
+    if (!success) {
+        NSLog(@"FlutterRTCAudioRecorder: setMode videoChat failed: %@", error.localizedDescription);
+    }
+}
+
+- (void)restoreAudioSession {
+    if (_previousAudioCategory == nil) {
+        return;
+    }
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSError *error = nil;
+    BOOL success = [session setCategory:_previousAudioCategory
+                            withOptions:_previousAudioCategoryOptions
+                                  error:&error];
+    if (!success) {
+        NSLog(@"FlutterRTCAudioRecorder: restore setCategory failed: %@", error.localizedDescription);
+    }
+    success = [session setMode:_previousAudioMode error:&error];
+    if (!success) {
+        NSLog(@"FlutterRTCAudioRecorder: restore setMode failed: %@", error.localizedDescription);
+    }
 }
 
 - (void)initializeWriterWithFormat:(CMAudioFormatDescriptionRef)format {
@@ -112,6 +162,9 @@
     // Remove the sink first (stops callbacks from the audio thread).
     [_audioSink close];
     _audioSink = nil;
+
+    // Restore the previous audio session configuration now that recording is done.
+    [self restoreAudioSession];
 
     // If no audio buffer ever arrived, create an empty output file so callers
     // can still attempt muxing (FFmpeg will handle the missing audio).
