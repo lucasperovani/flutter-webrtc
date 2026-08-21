@@ -913,7 +913,7 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         try {
           MediaStreamTrack track = getTrackForId(trackId, peerConnectionId);
           if (track instanceof AudioTrack) {
-            AudioRecorderImpl recorder = new AudioRecorderImpl((AudioTrack) track, path);
+            AudioRecorderImpl recorder = new AudioRecorderImpl(context, (AudioTrack) track, path);
             recorder.start();
             audioRecorders.put(audioRecorderId, recorder);
             result.success(null);
