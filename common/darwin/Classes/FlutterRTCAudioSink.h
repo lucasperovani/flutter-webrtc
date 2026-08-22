@@ -2,7 +2,7 @@
 #import <CoreMedia/CoreMedia.h>
 #import <WebRTC/WebRTC.h>
 
-@interface FlutterRTCAudioSink : NSObject
+@interface FlutterRTCAudioSink : NSObject <RTCAudioRenderer>
 
 @property (nonatomic, copy) void (^bufferCallback)(CMSampleBufferRef);
 @property (nonatomic) CMAudioFormatDescriptionRef format;

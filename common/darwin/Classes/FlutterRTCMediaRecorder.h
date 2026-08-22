@@ -5,8 +5,8 @@
 #endif
 #import <WebRTC/WebRTC.h>
 
-@import Foundation;
-@import AVFoundation;
+#import <Foundation/Foundation.h>
+#import <AVFoundation/AVFoundation.h>
 
 @interface FlutterRTCMediaRecorder : NSObject <RTCVideoRenderer>
 

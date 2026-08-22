@@ -31,6 +31,7 @@ import com.cloudwebrtc.webrtc.audio.LocalAudioTrack;
 import com.cloudwebrtc.webrtc.audio.PlaybackSamplesReadyCallbackAdapter;
 import com.cloudwebrtc.webrtc.audio.RecordSamplesReadyCallbackAdapter;
 import com.cloudwebrtc.webrtc.record.AudioChannel;
+import com.cloudwebrtc.webrtc.record.AudioRecorderImpl;
 import com.cloudwebrtc.webrtc.record.FrameCapturer;
 import com.cloudwebrtc.webrtc.utils.AnyThreadResult;
 import com.cloudwebrtc.webrtc.utils.Callback;
@@ -115,6 +116,7 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
   private final Map<String, MediaStream> localStreams = new HashMap<>();
   private final Map<String, LocalTrack> localTracks = new HashMap<>();
   private final LongSparseArray<FlutterRTCVideoRenderer> renders = new LongSparseArray<>();
+  private final Map<Integer, AudioRecorderImpl> audioRecorders = new HashMap<>();
 
   public RecordSamplesReadyCallbackAdapter recordSamplesReadyCallbackAdapter;
 
@@ -903,6 +905,36 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         String albumName = call.argument("albumName");
         getUserMediaImpl.stopRecording(recorderId, albumName, () -> result.success(null));
         break;
+      case "startAudioRecordToFile": {
+        String path = call.argument("path");
+        String trackId = call.argument("trackId");
+        String peerConnectionId = call.argument("peerConnectionId");
+        Integer audioRecorderId = call.argument("recorderId");
+        try {
+          MediaStreamTrack track = getTrackForId(trackId, peerConnectionId);
+          if (track instanceof AudioTrack) {
+            AudioRecorderImpl recorder = new AudioRecorderImpl(context, (AudioTrack) track, path);
+            recorder.start();
+            audioRecorders.put(audioRecorderId, recorder);
+            result.success(null);
+          } else {
+            resultError("startAudioRecordToFile", "Audio track not found or not an audio track", result);
+          }
+        } catch (Exception e) {
+          resultError("startAudioRecordToFile", e.getMessage(), result);
+        }
+        break;
+      }
+      case "stopAudioRecordToFile": {
+        Integer audioRecorderId = call.argument("recorderId");
+        AudioRecorderImpl recorder = audioRecorders.remove(audioRecorderId);
+        if (recorder != null) {
+          recorder.stop(() -> result.success(null));
+        } else {
+          resultError("stopAudioRecordToFile", "Audio recorder not found: " + audioRecorderId, result);
+        }
+        break;
+      }
       case "captureFrame": {
         String path = call.argument("path");
         String videoTrackId = call.argument("trackId");

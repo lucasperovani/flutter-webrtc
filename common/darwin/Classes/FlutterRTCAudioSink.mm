@@ -1,67 +1,105 @@
 #import <AVFoundation/AVFoundation.h>
+#import <os/lock.h>
 #import "FlutterRTCAudioSink.h"
-#import "RTCAudioSource+Private.h"
-#include "media_stream_interface.h"
-#include "audio_sink_bridge.cpp"
 
 @implementation FlutterRTCAudioSink {
-    AudioSinkBridge *_bridge;
-    webrtc::AudioSourceInterface* _audioSource;
+    os_unfair_lock _lock;
+    BOOL _closed;
+    RTCAudioTrack *_audioTrack;
 }
 
 - (instancetype) initWithAudioTrack:(RTCAudioTrack* )audio {
     self = [super init];
-    rtc::scoped_refptr<webrtc::AudioSourceInterface> audioSourcePtr = audio.source.nativeAudioSource;
-    _audioSource = audioSourcePtr.get();
-    _bridge = new AudioSinkBridge((void*)CFBridgingRetain(self));
-    _audioSource->AddSink(_bridge);
+    _lock = OS_UNFAIR_LOCK_INIT;
+    _closed = NO;
+    _audioTrack = audio;
+    [audio addRenderer:self];
     return self;
 }
 
 - (void) close {
-    _audioSource->RemoveSink(_bridge);
-    delete _bridge;
-    _bridge = nil;
-    _audioSource = nil;
+    os_unfair_lock_lock(&_lock);
+    if (_closed) {
+        os_unfair_lock_unlock(&_lock);
+        return;
+    }
+    _closed = YES;
+    self.bufferCallback = nil;
+    os_unfair_lock_unlock(&_lock);
+
+    // removeRenderer: must be called on the main thread according to WebRTC docs.
+    if ([NSThread isMainThread]) {
+        [self doClose];
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            [self doClose];
+        });
+    }
 }
 
-void RTCAudioSinkCallback (void *object, const void *audio_data, int bits_per_sample, int sample_rate, size_t number_of_channels, size_t number_of_frames)
-{
-    AudioBufferList audioBufferList;
-    AudioBuffer audioBuffer;
-    audioBuffer.mData = (void*) audio_data;
-    audioBuffer.mDataByteSize = bits_per_sample / 8 * number_of_channels * number_of_frames;
-    audioBuffer.mNumberChannels = number_of_channels;
-    audioBufferList.mNumberBuffers = 1;
-    audioBufferList.mBuffers[0] = audioBuffer;
-    AudioStreamBasicDescription audioDescription;
-    audioDescription.mBytesPerFrame = bits_per_sample / 8 * number_of_channels;
-    audioDescription.mBitsPerChannel = bits_per_sample;
-    audioDescription.mBytesPerPacket = bits_per_sample / 8 * number_of_channels;
-    audioDescription.mChannelsPerFrame = number_of_channels;
-    audioDescription.mFormatID = kAudioFormatLinearPCM;
-    audioDescription.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
-    audioDescription.mFramesPerPacket = 1;
-    audioDescription.mReserved = 0;
-    audioDescription.mSampleRate = sample_rate;
-    CMAudioFormatDescriptionRef formatDesc;
-    CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &audioDescription, 0, nil, 0, nil, nil, &formatDesc);
-    CMSampleBufferRef buffer;
+- (void) doClose {
+    if (_audioTrack != nil) {
+        [_audioTrack removeRenderer:self];
+        _audioTrack = nil;
+    }
+}
+
+- (void)renderPCMBuffer:(AVAudioPCMBuffer *)pcmBuffer {
+    os_unfair_lock_lock(&_lock);
+    if (_closed) {
+        os_unfair_lock_unlock(&_lock);
+        return;
+    }
+    void (^callback)(CMSampleBufferRef) = [self.bufferCallback copy];
+    os_unfair_lock_unlock(&_lock);
+
+    if (callback == nil || pcmBuffer == nil) {
+        return;
+    }
+
+    AVAudioFormat *format = pcmBuffer.format;
+    AudioStreamBasicDescription asbd = *format.streamDescription;
+
+    CMAudioFormatDescriptionRef formatDesc = NULL;
+    OSStatus fmtStatus = CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &asbd, 0, nil, 0, nil, nil, &formatDesc);
+    if (fmtStatus != noErr || formatDesc == NULL) {
+        return;
+    }
+
+    // Build an AudioBufferList from the planar/interleaved PCM data.
+    AudioBufferList *abl = (AudioBufferList *)malloc(sizeof(AudioBufferList) + sizeof(AudioBuffer) * (pcmBuffer.format.channelCount - 1));
+    abl->mNumberBuffers = pcmBuffer.format.channelCount;
+    for (AVAudioChannelCount i = 0; i < pcmBuffer.format.channelCount; i++) {
+        abl->mBuffers[i].mNumberChannels = 1;
+        abl->mBuffers[i].mData = pcmBuffer.mutableAudioBufferList->mBuffers[i].mData;
+        abl->mBuffers[i].mDataByteSize = pcmBuffer.mutableAudioBufferList->mBuffers[i].mDataByteSize;
+    }
+
+    CMSampleBufferRef buffer = NULL;
     CMSampleTimingInfo timing;
     timing.decodeTimeStamp = kCMTimeInvalid;
-    timing.presentationTimeStamp = CMTimeMake(0, sample_rate);
-    timing.duration = CMTimeMake(1, sample_rate);
-    CMSampleBufferCreate(kCFAllocatorDefault, nil, false, nil, nil, formatDesc, number_of_frames * number_of_channels, 1, &timing, 0, nil, &buffer);
-    CMSampleBufferSetDataBufferFromAudioBufferList(buffer, kCFAllocatorDefault, kCFAllocatorDefault, 0, &audioBufferList);
-    @autoreleasepool {
-        FlutterRTCAudioSink* sink = (__bridge FlutterRTCAudioSink*)(object);
-        sink.format = formatDesc;
-        if (sink.bufferCallback != nil) {
-            sink.bufferCallback(buffer);
-        } else {
-            NSLog(@"Buffer callback is nil");
-        }
+    timing.presentationTimeStamp = CMTimeMake(0, (int32_t)format.sampleRate);
+    timing.duration = CMTimeMake(1, (int32_t)format.sampleRate);
+    OSStatus bufStatus = CMSampleBufferCreate(kCFAllocatorDefault, nil, false, nil, nil, formatDesc, pcmBuffer.frameLength, 1, &timing, 0, nil, &buffer);
+    if (bufStatus != noErr || buffer == NULL) {
+        free(abl);
+        CFRelease(formatDesc);
+        return;
     }
+    OSStatus dataStatus = CMSampleBufferSetDataBufferFromAudioBufferList(buffer, kCFAllocatorDefault, kCFAllocatorDefault, 0, abl);
+    free(abl);
+    if (dataStatus != noErr) {
+        CFRelease(buffer);
+        CFRelease(formatDesc);
+        return;
+    }
+
+    @autoreleasepool {
+        self.format = (CMAudioFormatDescriptionRef)CFAutorelease(CFRetain(formatDesc));
+        callback(buffer);
+    }
+    CFRelease(buffer);
+    CFRelease(formatDesc);
 }
 
 @end
