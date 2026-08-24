@@ -109,9 +109,14 @@
         return;
     }
 
+    void (^pcmCallback)(AVAudioPCMBuffer *) = [self.pcmCallback copy];
     void (^callback)(CMSampleBufferRef) = [self.bufferCallback copy];
 
     os_unfair_lock_unlock(&_lock);
+
+    if (pcmCallback != nil && pcmBuffer != nil) {
+        pcmCallback(pcmBuffer);
+    }
 
     if (callback == nil || pcmBuffer == nil) {
         return;
@@ -429,6 +434,20 @@
     );
 
     os_unfair_lock_unlock(&_lock);
+
+    // Log drift relative to wall-clock once per second for diagnostics.
+    static NSTimeInterval lastLogTime = 0;
+    NSTimeInterval now = CACurrentMediaTime();
+    if (now - lastLogTime >= 1.0) {
+        lastLogTime = now;
+        NSLog(
+            @"[FlutterRTCAudioSink] Drift check: "
+            @"sinkPTS=%.6f wallClock=%.6f drift=%.6f",
+            CMTimeGetSeconds(pts),
+            now,
+            CMTimeGetSeconds(pts) - now
+        );
+    }
 
     NSLog(
         @"[FlutterRTCAudioSink] "

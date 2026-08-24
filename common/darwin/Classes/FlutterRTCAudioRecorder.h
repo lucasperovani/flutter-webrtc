@@ -21,6 +21,20 @@
 - (instancetype _Nonnull)initWithAudioTrack:(RTCAudioTrack* _Nonnull)audio
                                  outputFile:(NSURL* _Nonnull)out;
 
+/// Prepares the audio sink without starting the file writer.
+/// This lets the caller hear the WebRTC audio before recording begins.
+- (void)prepare;
+
+/// Starts recording to the given output file.
+/// If [recordingStartTime] is greater than 0, the audio timeline is anchored
+/// to that wall-clock time (seconds since epoch) so it can be synchronized
+/// with another stream (e.g. camera). Pass 0 to keep the legacy behavior.
+- (void)startRecordingWithOutputFile:(NSURL* _Nonnull)out
+                  recordingStartTime:(NSTimeInterval)recordingStartTime;
+
+/// Convenience that starts recording to the file passed in init.
+- (void)startRecordingWithRecordingStartTime:(NSTimeInterval)recordingStartTime;
+
 /// Stops recording, finalizes the file, and releases the audio sink.
 /// Calls [result] on the main thread when done.
 - (void)stop:(_Nonnull FlutterResult)result;

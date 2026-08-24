@@ -1722,19 +1722,59 @@ static __weak id<RTCAudioDeviceModuleDelegate> gAudioDeviceModuleObserver = nil;
                                               message:[NSString stringWithFormat:@"Error: recorder with id %@ not found!",recorderId]
                                                 details:nil]);
                 }
+  } else if ([@"prepareAudioRecord" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSNumber* recorderId = argsMap[@"recorderId"];
+      NSString* trackId = argsMap[@"trackId"];
+      NSString* peerConnectionId = argsMap[@"peerConnectionId"];
+
+      RTCMediaStreamTrack* track = [self trackForId:trackId peerConnectionId:peerConnectionId];
+      if (track != nil && [track isKindOfClass:[RTCAudioTrack class]]) {
+          FlutterRTCAudioRecorder* recorder = [[FlutterRTCAudioRecorder alloc]
+                  initWithAudioTrack:(RTCAudioTrack*)track
+                  outputFile:[NSURL fileURLWithPath:NSTemporaryDirectory()]];
+          [recorder prepare];
+          self.audioRecorders[recorderId] = recorder;
+      }
+      result(nil);
+  } else if ([@"startAudioRecord" isEqualToString:call.method]) {
+      NSDictionary* argsMap = call.arguments;
+      NSNumber* recorderId = argsMap[@"recorderId"];
+      NSString* path = argsMap[@"path"];
+      NSNumber* recordingStartTimeNumber = argsMap[@"recordingStartTime"];
+      NSTimeInterval recordingStartTime =
+          recordingStartTimeNumber != nil ? recordingStartTimeNumber.doubleValue : 0;
+
+      FlutterRTCAudioRecorder* recorder = self.audioRecorders[recorderId];
+      if (recorder != nil) {
+          NSURL* pathUrl = [NSURL fileURLWithPath:path];
+          [recorder startRecordingWithOutputFile:pathUrl
+                              recordingStartTime:recordingStartTime];
+          result(nil);
+      } else {
+          result([FlutterError errorWithCode:@"startAudioRecord failed"
+                                    message:[NSString stringWithFormat:@"Error: audio recorder with id %@ not found!", recorderId]
+                                    details:nil]);
+      }
   } else if ([@"startAudioRecordToFile" isEqualToString:call.method]) {
       NSDictionary* argsMap = call.arguments;
       NSNumber* recorderId = argsMap[@"recorderId"];
       NSString* path = argsMap[@"path"];
       NSString* trackId = argsMap[@"trackId"];
       NSString* peerConnectionId = argsMap[@"peerConnectionId"];
+      NSNumber* recordingStartTimeNumber = argsMap[@"recordingStartTime"];
+      NSTimeInterval recordingStartTime =
+          recordingStartTimeNumber != nil ? recordingStartTimeNumber.doubleValue : 0;
 
       RTCMediaStreamTrack* track = [self trackForId:trackId peerConnectionId:peerConnectionId];
       if (track != nil && [track isKindOfClass:[RTCAudioTrack class]]) {
           NSURL* pathUrl = [NSURL fileURLWithPath:path];
-          self.audioRecorders[recorderId] = [[FlutterRTCAudioRecorder alloc]
+          FlutterRTCAudioRecorder* recorder = [[FlutterRTCAudioRecorder alloc]
                   initWithAudioTrack:(RTCAudioTrack*)track
                   outputFile:pathUrl];
+          [recorder prepare];
+          [recorder startRecordingWithRecordingStartTime:recordingStartTime];
+          self.audioRecorders[recorderId] = recorder;
       }
       result(nil);
   } else if ([@"stopAudioRecordToFile" isEqualToString:call.method]) {
