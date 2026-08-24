@@ -166,13 +166,9 @@
     // Restore the previous audio session configuration now that recording is done.
     [self restoreAudioSession];
 
-    // If no audio buffer ever arrived, create an empty output file so callers
-    // can still attempt muxing (FFmpeg will handle the missing audio).
+    // If no audio buffer ever arrived.
     if (!_isInitialized) {
-        NSLog(@"FlutterRTCAudioRecorder: stop called before any audio buffer; creating empty file");
-        [[NSFileManager defaultManager] createFileAtPath:self.output.path
-                                                  contents:[NSData data]
-                                                attributes:nil];
+        NSLog(@"FlutterRTCAudioRecorder: No audio buffers received, returning without an audio file.");
         result(nil);
         return;
     }
