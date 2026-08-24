@@ -156,7 +156,7 @@
 
     /*
      * ============================================================
-     * 1. Criar CMAudioFormatDescription
+     * 1. Create the CMAudioFormatDescription
      * ============================================================
      */
 
@@ -185,7 +185,7 @@
 
     /*
      * ============================================================
-     * 2. Obter AudioBufferList
+     * 2. Retrieve the AudioBufferList
      * ============================================================
      */
 
@@ -212,11 +212,12 @@
 
     /*
      * ============================================================
-     * 3. Copiar os dados PCM para memória própria
+     * 3. Copy the PCM data into our own memory
      *
-     * IMPORTANTE:
-     * Não vamos passar diretamente a memória do
-     * AVAudioPCMBuffer para o CMSampleBuffer.
+     * IMPORTANT:
+     * Do not pass the AVAudioPCMBuffer's memory directly to the
+     * CMSampleBuffer. We allocate a separate block so the sample
+     * buffer owns a stable, independent copy of the audio data.
      * ============================================================
      */
     
@@ -236,14 +237,14 @@
     size_t copiedBytes = 0;
 
     /*
-     * Caso interleaved:
+     * Interleaved case:
      *
      *   mNumberBuffers = 1
      *
-     * Caso mono interleaved, que é exatamente o seu caso:
+     * Mono interleaved case:
      *
      *   buffer[0]
-     *   └── todos os 480 samples
+     *   └── all 480 samples
      */
 
     if ((asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0) {
@@ -279,10 +280,10 @@
 
     /*
      * ============================================================
-     * 4. Caso non-interleaved
+     * 4. Non-interleaved case
      *
-     * Para o seu caso atual provavelmente não será usado,
-     * mas deixamos correto.
+     * Not expected for the current audio path, but handled here
+     * for correctness and completeness.
      * ============================================================
      */
 
@@ -311,11 +312,11 @@
         }
 
         /*
-         * Se o formato é non-interleaved, precisamos intercalar
-         * os canais para produzir um buffer PCM interleaved.
+         * If the format is non-interleaved, we must interleave the
+         * channels to produce a single interleaved PCM buffer.
          *
-         * Isso é necessário porque estamos criando abaixo um
-         * único CMBlockBuffer.
+         * This is required because we create a single CMBlockBuffer
+         * below, which expects one contiguous interleaved data block.
          */
 
         const UInt32 bytesPerSample =
@@ -370,7 +371,7 @@
 
     /*
      * ============================================================
-     * 5. Criar CMBlockBuffer com os dados PCM
+     * 5. Create a CMBlockBuffer from the PCM data
      * ============================================================
      */
 
@@ -398,8 +399,8 @@
         );
 
         /*
-         * Como o CMBlockBuffer não foi criado, precisamos liberar
-         * manualmente a memória.
+         * The CMBlockBuffer was not created, so we must free the
+         * allocated audio data manually to avoid a leak.
          */
         free(audioData);
 
@@ -409,7 +410,7 @@
 
     /*
      * ============================================================
-     * 6. Criar PTS/duração
+     * 6. Compute the PTS and duration
      * ============================================================
      */
 
@@ -446,13 +447,15 @@
 
     /*
      * ============================================================
-     * 7. Criar CMSampleBuffer READY
+     * 7. Create a ready CMSampleBuffer
      *
-     * Aqui não usamos:
+     * We do NOT use:
      *
      * CMSampleBufferSetDataBufferFromAudioBufferList
      *
-     * Portanto eliminamos o ponto que está retornando -12731.
+     * That API was returning -12731 (kCMSampleBufferError_AllocatedData
+     * failure), so we build the sample buffer from our own block buffer
+     * instead.
      * ============================================================
      */
 
@@ -486,7 +489,7 @@
 
     /*
      * ============================================================
-     * 8. Atualizar formato
+     * 8. Update the exposed audio format
      * ============================================================
      */
 
@@ -499,15 +502,15 @@
             );
 
         /*
-         * O callback recebe um CMSampleBuffer que já possui
-         * seu próprio CMBlockBuffer.
+         * The callback receives a CMSampleBuffer that already owns
+         * its own CMBlockBuffer, so no extra retain is needed here.
          */
         callback(sampleBuffer);
     }
 
     /*
      * ============================================================
-     * 9. Liberar referências locais
+     * 9. Release local references
      * ============================================================
      */
 
